@@ -43,6 +43,24 @@ class AddContactDialog(QDialog):
         self.form_layout.addWidget(self.button_box)
         self.setLayout(self.form_layout)
 
+    def accept(self):
+        username = self.username_field.text().strip()
+        phone = self.phone_field.text().strip()
+
+        if not username or not phone:
+            QMessageBox.warning(self, "Input Error", "Username and phone cannot be empty.")
+            return
+        
+        if not database.check_user_phone(username, phone):
+            QMessageBox.warning(self, "Input Error", "Phone number does not match the username.")
+            return
+        
+        if database.add_contact(main_window.centralWidget().username, username, phone):
+            QMessageBox.information(self, "Success", f"Contact {username} added successfully!")
+            main_window.centralWidget().update_chat_stack()
+        else:
+            QMessageBox.warning(self, "Error", "Failed to add contact. It may already exist.")
+
 class SettingsDialog(QDialog):
 
     def __init__(self):
@@ -190,9 +208,10 @@ class SignUpPage(QWidget):
 
 
 class ChatPage(QWidget):
-    def __init__(self, sock: socket.socket, username: str):
+    def __init__(self, sock: socket.socket, username: str, recipient: str):
         super().__init__()
         self.sock = sock
+        self.recipient = recipient
         self.username = username
 
         self.layout = QVBoxLayout(self)
@@ -209,45 +228,55 @@ class ChatPage(QWidget):
         self.send_button.clicked.connect(self.send_message)
         self.message_input.returnPressed.connect(self.send_message)
 
-        threading.Thread(target=self.receive_loop, daemon=True).start()
 
     def send_message(self):
         text = self.message_input.text().strip()
         if text:
+            item = QListWidgetItem(f"You: {text}")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            self.messages_display.addItem(item)
+            self.messages_display.scrollToBottom()
             try:
-                self.sock.send(f"{self.username}: {text}".encode())
+                self.sock.send(f"{self.recipient}: {text}".encode())
+                print(f"{self.username} sent: {text}")
                 self.message_input.clear()
             except:
-                self.messages_display.addItem("⚠️ Could not send message.")
+                error_item = QListWidgetItem("⚠️ Could not send message.")
+                error_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                self.messages_display.addItem(error_item)
 
-    def receive_loop(self):
-        while True:
-            try:
-                msg = self.sock.recv(1024)
-                if not msg:
-                    break
-                self.messages_display.addItem(msg.decode())
-            except:
-                break
+
+    def add_received_message(self, text):
+        item = QListWidgetItem(f"{self.recipient}: {text}")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.messages_display.addItem(item)
+        self.messages_display.scrollToBottom()
 
 
 class MainChatWindow(QWidget):
+
     def __init__(self, sock, username):
         super().__init__()
         self.setWindowTitle("Chat")
-        self.layout = QVBoxLayout(self)
+        self.layout = QHBoxLayout(self)
+        self.quick_actions_bar = QHBoxLayout(self)
+
+        self.sock = sock
+        self.username = username
         
         # Sidebar
         self.sidebar = QVBoxLayout()
+        self.add_contact_button = QPushButton("➕ Add Contact")
+        self.add_contact_button.clicked.connect(lambda: AddContactDialog().exec())
         self.profile_button = QPushButton(f"👤 {username}")
         self.settings_button = QPushButton("⚙️ Settings")
-        self.sidebar.addWidget(self.profile_button)
-        self.sidebar.addWidget(self.settings_button)
+        self.quick_actions_bar.addWidget(self.settings_button)
+        self.quick_actions_bar.addWidget(self.add_contact_button)
+        self.quick_actions_bar.addWidget(self.profile_button)
+        self.sidebar.addLayout(self.quick_actions_bar)
         
         self.chat_list_label = QLabel("Chats")
         self.chat_list = QListWidget()
-        for name in ["Alice", "Bob", "Charlie"]:
-            self.chat_list.addItem(name)
         
         self.sidebar.addWidget(self.chat_list_label)
         self.sidebar.addWidget(self.chat_list)
@@ -255,18 +284,48 @@ class MainChatWindow(QWidget):
         
         # Chat area
         self.chat_stack = QStackedWidget()
-        for name in ["Alice", "Bob", "Charlie"]:
-            chat_page = ChatPage(sock, name)
-            self.chat_stack.addWidget(chat_page)
+        self.chat_pages = {}
+        self.update_chat_stack()
 
         self.layout.addLayout(self.sidebar, 1)
         self.layout.addWidget(self.chat_stack, 3)
         
         self.chat_list.itemClicked.connect(self.switch_chat)
 
+        threading.Thread(target=self.receive_loop, daemon=True).start()
+
     def switch_chat(self, item):
         index = self.chat_list.row(item)
         self.chat_stack.setCurrentIndex(index)
+
+
+    def update_chat_stack(self):
+        for name in database.get_contacts(self.username):
+            chat_page = ChatPage(self.sock, self.username, name)
+            self.chat_list.addItem(name)
+            self.chat_pages[name] = chat_page
+            self.chat_stack.addWidget(chat_page)
+        
+    def receive_loop(self):
+        print("Starting receive loop...")
+        while True:
+            msg = self.sock.recv(1024)
+            print(f"Received raw message: {msg}")
+            if not msg:
+                break
+            decoded = msg.decode()
+            print(f"Received: {decoded}")
+            if ':' in decoded:
+                sender, text = decoded.split(':', 1)
+                sender = sender.strip()
+                text = text.strip()
+                if sender in self.chat_pages:
+                    item = QListWidgetItem(f"{sender}: {text}")
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
+                    self.chat_pages[sender].messages_display.addItem(item)
+                    self.chat_pages[sender].messages_display.scrollToBottom()
+                else:
+                    print("idk yet")
 
 main_window = MainWindow()
 main_window.setCentralWidget(SignInPage())
