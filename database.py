@@ -11,7 +11,7 @@ class User(Base):
     phone = Column(String)
     password = Column(String, nullable=False)
     contacts = Column(String)
-
+    
 engine = create_engine('sqlite:///users.db', echo=False)
 Session = sessionmaker(bind=engine)
 session = Session()
@@ -30,6 +30,7 @@ def add_user(username, phone, password):
 
 def check_user(username, password):
     return session.query(User).filter_by(username=username, password=password).first()
+
 
 def check_user_phone(username, phone):
     user = session.query(User).filter_by(username=username).first()
@@ -57,3 +58,9 @@ def get_contacts(username):
     if user:
         return user.contacts.split(',') if user.contacts else []
     return []
+
+def get_phone(username):
+    user = session.query(User).filter_by(username=username).first()
+    if user:
+        return user.phone
+    return None
