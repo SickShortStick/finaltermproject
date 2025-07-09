@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, create_engine, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 Base = declarative_base()
 
@@ -12,6 +13,46 @@ class User(Base):
     password = Column(String, nullable=False)
     contacts = Column(String)
     
+
+class Message(Base):
+    __tablename__ = 'messages'
+
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey('users.id'))
+    receiver_id = Column(Integer, ForeignKey('users.id'))
+    chat_content = Column(String, nullable=False)
+    timestamp = Column(String, default=datetime.utcnow)
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
+
+
+def save_message(sender_username, receiver_username, content):
+    sender = session.query(User).filter_by(username=sender_username).first()
+    receiver = session.query(User).filter_by(username=receiver_username).first()
+    if sender and receiver:
+        msg = Message(sender_id=sender.id, receiver_id=receiver.id, chat_content=content)
+        session.add(msg)
+        session.commit()
+        return True
+    return False
+
+
+def get_chat_history(username1, username2):
+    user1 = session.query(User).filter_by(username=username1).first()
+    user2 = session.query(User).filter_by(username=username2).first()
+
+    if not user1 or not user2:
+        return []
+
+    messages = session.query(Message).filter(
+        ((Message.sender_id == user1.id) & (Message.receiver_id == user2.id)) |
+        ((Message.sender_id == user2.id) & (Message.receiver_id == user1.id))
+    ).order_by(Message.timestamp).all()
+    
+    return messages
+
+
 engine = create_engine('sqlite:///users.db', echo=False)
 Session = sessionmaker(bind=engine)
 session = Session()
@@ -53,6 +94,15 @@ def add_contact(username, contact, phone):
     return False
 
 
+def update_user_info(username, new_password):
+    user = session.query(User).filter_by(username=username).first()
+    if user:
+        user.password = new_password
+        session.commit()
+        return True
+    return False
+
+
 def get_contacts(username):
     user = session.query(User).filter_by(username=username).first()
     if user:
@@ -63,4 +113,10 @@ def get_phone(username):
     user = session.query(User).filter_by(username=username).first()
     if user:
         return user.phone
+    return None
+
+def get_id(username):
+    user = session.query(User).filter_by(username=username).first()
+    if user:
+        return user.id
     return None

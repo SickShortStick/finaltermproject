@@ -126,8 +126,9 @@ class SettingsDialog(QDialog):
         self.form_layout.addRow(self.change_profile_picture_button)
 
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
-        self.button_box.accepted.connect(self.accept)
+        self.button_box.accepted.connect(self.change_password)
         self.button_box.rejected.connect(self.reject)
+
 
         self.form_layout.addWidget(self.button_box)
         self.setLayout(self.form_layout)
@@ -146,6 +147,25 @@ class SettingsDialog(QDialog):
                 QMessageBox.information(self, "Success", "Profile picture updated!")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not update picture:\n{e}")
+
+        
+    def change_password(self):
+        new_password = self.new_password_field.text().strip()
+        confirm_password = self.confirm_password_field.text().strip()
+
+        if not new_password or not confirm_password:
+            QMessageBox.warning(self, "Input Error", "New password and confirmation cannot be empty.")
+            return
+        if new_password != confirm_password:
+            QMessageBox.warning(self, "Input Error", "Passwords do not match.")
+            return
+
+        if database.update_user_info(main_window.centralWidget().username, new_password):
+            QMessageBox.information(self, "Success", "Password updated successfully!")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to update password.")
+
+
 class SignInPage(QWidget):
 
     def __init__(self):
@@ -280,6 +300,8 @@ class ChatPage(QWidget):
         self.send_button.clicked.connect(self.send_message)
         self.message_input.returnPressed.connect(self.send_message)
 
+        self.get_chat_history()
+
 
     def send_message(self):
         text = self.message_input.text().strip()
@@ -291,6 +313,7 @@ class ChatPage(QWidget):
             try:
                 self.sock.send(f"{self.recipient}: {text}".encode())
                 print(f"{self.username} sent: {text}")
+                database.save_message(self.username, self.recipient, text)
                 self.message_input.clear()
             except:
                 error_item = QListWidgetItem("⚠️ Could not send message.")
@@ -304,6 +327,18 @@ class ChatPage(QWidget):
         self.messages_display.addItem(item)
         self.messages_display.scrollToBottom()
 
+    
+    def get_chat_history(self):
+        print(f'{database.get_chat_history(self.username, self.recipient)}')
+        for message in database.get_chat_history(self.username, self.recipient):
+            if message.sender_id == database.get_id(self.username):
+                item = QListWidgetItem(f"You: {message.chat_content}")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            else:
+                item = QListWidgetItem(f"{self.recipient}: {message.chat_content}")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
+            self.messages_display.addItem(item)
+
 
 class MainChatWindow(QWidget):
 
@@ -311,13 +346,13 @@ class MainChatWindow(QWidget):
         super().__init__()
         self.setWindowTitle("Chat")
         self.layout = QHBoxLayout(self)
-        self.quick_actions_bar = QHBoxLayout(self)
+        self.quick_actions_bar = QHBoxLayout()
 
         self.sock = sock
         self.username = username
         self.phone = phone
         
-        # Sidebar
+        
         self.sidebar = QVBoxLayout()
         self.add_contact_button = QPushButton()
         self.add_contact_icon = QIcon("Assets/Contact.png")
@@ -350,7 +385,7 @@ class MainChatWindow(QWidget):
         self.sidebar.addWidget(self.chat_list)
         self.sidebar.addStretch()
         
-        # Chat area
+        
         self.chat_stack = QStackedWidget()
         self.chat_pages = {}
         self.update_chat_stack()
