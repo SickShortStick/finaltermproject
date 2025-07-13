@@ -21,21 +21,27 @@ class Message(Base):
     sender_id = Column(Integer, ForeignKey('users.id'))
     receiver_id = Column(Integer, ForeignKey('users.id'))
     chat_content = Column(String, nullable=False)
+    message_type = Column(String, default='text')
     timestamp = Column(String, default=datetime.utcnow)
 
     sender = relationship("User", foreign_keys=[sender_id])
     receiver = relationship("User", foreign_keys=[receiver_id])
 
 
-def save_message(sender_username, receiver_username, content):
+def save_message(sender_username, receiver_username, content, message_type='text'):
     sender = session.query(User).filter_by(username=sender_username).first()
     receiver = session.query(User).filter_by(username=receiver_username).first()
     if sender and receiver:
-        msg = Message(sender_id=sender.id, receiver_id=receiver.id, chat_content=content)
+        msg = Message(sender_id=sender.id, receiver_id=receiver.id, chat_content=content, message_type=message_type)
         session.add(msg)
         session.commit()
         return True
     return False
+
+
+def save_image(sender_username, receiver_username, image_path, filename):
+    content = f"{image_path}|{filename}"
+    return save_message(sender_username, receiver_username, content, message_type='image')
 
 
 def get_chat_history(username1, username2):
@@ -62,7 +68,7 @@ Base.metadata.create_all(engine)
 
 def add_user(username, phone, password):
     if session.query(User).filter_by(username=username).first():
-        return False  # Username already exists
+        return False
     new_user = User(username=username, phone=phone, password=password)
     session.add(new_user)
     session.commit()
@@ -101,6 +107,35 @@ def update_user_info(username, new_password):
         session.commit()
         return True
     return False
+
+def update_username(old_username, new_username):
+    if session.query(User).filter_by(username=new_username).first():
+        return False
+    user = session.query(User).filter_by(username=old_username).first()
+    if user:
+        user.username = new_username
+        session.commit()
+        update_contacts_username(old_username, new_username)
+        return True
+    return False
+
+def update_phone(username, new_phone):
+    user = session.query(User).filter_by(username=username).first()
+    if user:
+        user.phone = new_phone
+        session.commit()
+        return True
+    return False
+
+def update_contacts_username(old_username, new_username):
+    users = session.query(User).all()
+    for user in users:
+        if user.contacts:
+            contacts = user.contacts.split(',')
+            if old_username in contacts:
+                contacts = [new_username if contact == old_username else contact for contact in contacts]
+                user.contacts = ','.join(contacts)
+    session.commit()
 
 
 def get_contacts(username):
