@@ -460,6 +460,16 @@ class ChatPage(QWidget):
                     self.messages_display.setItemWidget(chat_list_item, image_widget)
 
 
+class ClickableContactWidget(QWidget):
+    def __init__(self, parent_window, index):
+        super().__init__()
+        self.parent_window = parent_window
+        self.index = index
+    
+    def mousePressEvent(self, event):
+        self.parent_window.switch_to_chat_by_index(self.index)
+        super().mousePressEvent(event)
+
 class MainChatWindow(QWidget):
     message_received = pyqtSignal(str, str)
     image_received = pyqtSignal(str, str, str, bytes)
@@ -524,10 +534,27 @@ class MainChatWindow(QWidget):
 
     def switch_chat(self, item):
         index = self.chat_list.row(item)
-        self.chat_stack.setCurrentIndex(index)
+        if index >= 0:
+            self.chat_stack.setCurrentIndex(index)
+            print(f"Switched to chat at index {index}")
+        else:
+            print(f"Invalid index for chat switch: {index}")
+    
+    def switch_to_chat_by_index(self, index):
+        if 0 <= index < self.chat_stack.count():
+            self.chat_stack.setCurrentIndex(index)
+            print(f"Switched to chat at index {index}")
+        else:
+            print(f"Invalid index for chat switch: {index}")
 
 
     def handle_message_received(self, sender, text):
+        if sender not in self.chat_pages:
+            sender_phone = database.get_phone(sender)
+            if sender_phone:
+                database.add_contact(self.username, sender, sender_phone)
+                self.update_chat_stack()
+        
         if sender in self.chat_pages:
             item = QListWidgetItem(f"{sender}: {text}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -535,6 +562,12 @@ class MainChatWindow(QWidget):
             self.chat_pages[sender].messages_display.scrollToBottom()
     
     def handle_image_received(self, sender, filename, save_path, image_data):
+        if sender not in self.chat_pages:
+            sender_phone = database.get_phone(sender)
+            if sender_phone:
+                database.add_contact(self.username, sender, sender_phone)
+                self.update_chat_stack()
+        
         if sender in self.chat_pages:
             item = QListWidgetItem(f"{sender} sent an image: {filename}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -563,10 +596,17 @@ class MainChatWindow(QWidget):
 
     def update_chat_stack(self):
         self.chat_list.clear()
-        for name in database.get_contacts(self.username):
+        self.chat_pages.clear()
+        
+        while self.chat_stack.count() > 0:
+            widget = self.chat_stack.widget(0)
+            self.chat_stack.removeWidget(widget)
+            widget.deleteLater()
+        
+        for index, name in enumerate(database.get_contacts(self.username)):
             chat_page = ChatPage(self.sock, self.username, name)
             
-            contact_widget = QWidget()
+            contact_widget = ClickableContactWidget(self, index)
             contact_layout = QHBoxLayout()
             contact_layout.setContentsMargins(8, 8, 8, 8)
             contact_layout.setSpacing(10)
@@ -654,10 +694,7 @@ class MainChatWindow(QWidget):
                                 
                                 print(f"[MESSAGE] Received from {sender}: {text}")
                                 
-                                if sender in self.chat_pages:
-                                    self.message_received.emit(sender, text)
-                                else:
-                                    print(f"[WARNING] No chat page for sender: {sender}")
+                                self.message_received.emit(sender, text)
                                 
                                 message_buffer = b''
                                 break
